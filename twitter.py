@@ -4,6 +4,9 @@ from collections import deque
 import yaml
 import tweepy
 import sys
+import asyncio
+
+from tweepy.asynchronous import AsyncClient
 
 
 class TwitterUser:
@@ -20,7 +23,6 @@ class TwitterUser:
         self.following = following
         self.rank = 1
 
-
 # parents = following
 # children = followers
 
@@ -35,7 +37,6 @@ class TwitterUser:
         self.rank = temp_rank
 
         return abs(old_rank - self.rank)
-    
 
     def __str__(self) -> str:
         return f'''
@@ -71,36 +72,75 @@ class TwitterData:
 
         self.twitter_auth_creds = temp_twitter_auth_data['TWITTER']
 
-        self.client = tweepy.Client(access_token=self.twitter_auth_creds['ACCESS_TOKEN'],
-                                    access_token_secret=self.twitter_auth_creds['ACCESS_TOKEN_SECRET'],
-                                    consumer_key=self.twitter_auth_creds['COSUMER_KEY'],
-                                    consumer_secret=self.twitter_auth_creds['CONSUMER_SECRET'],
-                                    bearer_token=self.twitter_auth_creds['BEARER_TOKEN'],
-                                    wait_on_rate_limit=True)
+        self.client = AsyncClient(access_token=self.twitter_auth_creds['ACCESS_TOKEN'],
+                                access_token_secret=self.twitter_auth_creds['ACCESS_TOKEN_SECRET'],
+                                consumer_key=self.twitter_auth_creds['COSUMER_KEY'],
+                                consumer_secret=self.twitter_auth_creds['CONSUMER_SECRET'],
+                                bearer_token=self.twitter_auth_creds['BEARER_TOKEN'],
+                                wait_on_rate_limit=True)
 
-    def get_user_data_from_username(self, screen_name: str):
+    async def get_users_data_from_usernames(self, usernames: str):
+
+        users_data = await self.client.get_users(usernames=usernames, user_fields=['public_metrics'])
+
+        users = []
+
+        print(users_data.data)
+
+        for user in users_data.data:
+            users.append(await self.get_twitter_user_from_user_data(user))
+
+        return users
+
+    async def get_user_data_from_username(self, screen_name: str):
 
         print(f'now fetching for: {screen_name}')
 
-        user_data = self.client.get_user(username=screen_name,
-                                         user_fields=['public_metrics'])
+        user_data = await self.client.get_user(username=screen_name, user_fields=['public_metrics'])
 
-        user_id = user_data.data.id
+        return await self.get_twitter_user_from_user_data(user_data)
+
+        # user_id = user_data.data.id
+
+        # recent_tweets = self.get_users_recent_tweets(user_id)
+        # user_followers = self.get_user_followers(user_id)
+        # user_following = self.get_user_following(user_id)
+
+        # return TwitterUser(
+        #     user_id,
+        #     user_data.data.username,
+        #     user_data.data.name,
+        #     user_data.data.public_metrics['followers_count'],
+        #     user_data.data.public_metrics['following_count'],
+        #     await recent_tweets,
+        #     await user_followers,
+        #     await user_following
+        # )
+
+    async def get_twitter_user_from_user_data(self, user_data):
+
+        print(f' rather epic: {user_data}')
+
+        user_id = user_data.data['id']
+
+        # recent_tweets = self.get_users_recent_tweets(user_id)
+        user_followers = await self.get_user_followers(user_id)
+        user_following = await self.get_user_following(user_id)
 
         return TwitterUser(
-                            user_id,
-                           user_data.data.username,
-                           user_data.data.name,
-                           user_data.data.public_metrics['followers_count'],
-                           user_data.data.public_metrics['following_count'],
-                           self.get_users_recent_tweets(user_id=user_id),
-                           self.get_user_followers(user_id),
-                           self.get_user_following(user_id)
-                           )
+            user_id,
+            user_data.data['username'],
+            user_data.data['name'],
+            user_data.data['public_metrics']['followers_count'],
+            user_data.data['public_metrics']['following_count'],
+            None,
+            user_followers,
+            user_following
+        )
 
-    def get_users_recent_tweets(self, user_id, max_tweets=100):
+    async def get_users_recent_tweets(self, user_id, max_tweets=100):
 
-        tweets = self.client.get_users_tweets(
+        tweets = await self.client.get_users_tweets(
             user_id, tweet_fields=['context_annotations'], max_results=max_tweets)
 
         final_tweets = []
@@ -118,7 +158,6 @@ class TwitterData:
 
             for context in tweet_temp_context_annotations:
 
-                # domain_name = context['domain']['name']
                 entity_name = context['entity']['name']
 
                 if not entity_name in tweet_context_annotations:
@@ -134,9 +173,12 @@ class TwitterData:
 
         return final_tweets
 
-    def get_user_followers(self, user_id):
+    async def get_user_followers(self, user_id):
 
-        followers = self.client.get_users_followers(user_id,max_results=5)
+        followers = await self.client.get_users_followers(user_id, max_results=5)
+
+        if not followers.data:
+            return []
 
         followers_list = []
 
@@ -145,9 +187,12 @@ class TwitterData:
 
         return followers_list
 
-    def get_user_following(self, user_id):
+    async def get_user_following(self, user_id):
 
-        following = self.client.get_users_following(user_id,max_results=5)
+        following = await self.client.get_users_following(user_id, max_results=5)
+
+        if not following.data:
+            return []
 
         following_list = []
 
@@ -156,37 +201,64 @@ class TwitterData:
 
         return following_list
 
-def generate_graph(username):
-    
+
+async def generate_graph(username):
+
     twit = TwitterData(filename='twitter.yaml')
 
-    users = deque([(username,0)])
+    users = [username]
     processed = []
 
     graph = []
 
+    level = 0
+
     while len(users) > 0:
 
-        user,level = users.popleft()
-        
-        if user in processed:
-            continue
-        
-        user_data = twit.get_user_data_from_username(user)
+        users_f = filter(lambda x: x not in processed, users)
 
-        graph.append(user_data)
+        q = ""
 
-        if level < 2:
-            users.extend((x,level+1) for x in user_data.followers)
-            users.extend((x,level+1) for x in user_data.followers)
+        for _user in users_f:
+            q += _user.strip()+","
+
+        q = q[:-1]
+
+        print(f"query = {q}")
+
+        users_data = await twit.get_users_data_from_usernames(q)
+
+        graph.extend(users_data)
+
+        users.clear()
+
+        for user__ in users_data:
+
+            print(f'appending followers of: {user__.username}')
+
+            if level <= 2:
+                users.extend([x for x in user__.followers])
+                users.extend([x for x in user__.followers])
+
+        processed.extend(users_f)
+
+        level += 1
 
     return graph
 
-if __name__ == '__main__':
+
+async def main():
     twit = TwitterData(filename='twitter.yaml')
     user = sys.argv[1].strip()
     # user1 = twit.get_user_data_from_username(user)
     # print(user1)
-    g = generate_graph(user)
+    g = await generate_graph(user)
 
-    print(g)
+    for user in g:
+        print(user)
+
+if __name__ == '__main__':
+
+    loop = asyncio.get_event_loop()
+
+    loop.run_until_complete(loop.create_task(main()))
