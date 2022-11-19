@@ -61,7 +61,7 @@ class TwitterData:
             await recent_tweets
         )
 
-    async def get_users_recent_tweets(self, user_id, max_tweets=10):
+    async def get_users_recent_tweets(self, user_id, max_tweets=100):
 
         tweets = await self.client.get_users_tweets(
             user_id, tweet_fields=['context_annotations'], max_results=max_tweets)
