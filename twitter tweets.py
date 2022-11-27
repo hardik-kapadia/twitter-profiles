@@ -5,6 +5,7 @@ import sys
 import asyncio
 import re
 from tweepy.asynchronous import AsyncClient
+from gensim.parsing.preprocessing import remove_stopwords
 
 import jaccard_f as jacc
 
@@ -113,6 +114,8 @@ def transform_tweets_to_text(tweets: list):
         text+= ca+" "
         
     text = re.sub(r'https?://\S+', '', text)
+    
+    text = remove_stopwords(text)
     
     text = text.replace("#",'')
     text = text.replace('@','')
