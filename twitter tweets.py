@@ -48,7 +48,7 @@ class TwitterData:
 
         print(f'now fetching for: {screen_name}')
 
-        user_data = await self.client.get_user(username=screen_name, user_fields=['public_metrics'])
+        user_data = await self.client.get_user(username=screen_name)
 
         user_id = user_data.data.id
 
