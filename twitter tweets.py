@@ -1,11 +1,12 @@
 from dataclasses import dataclass
 import yaml
-import tweepy
 import sys
-import asyncio
-import re
+
 from tweepy.asynchronous import AsyncClient
+import asyncio
+
 from gensim.parsing.preprocessing import remove_stopwords
+import re
 
 import jaccard_f as jacc
 
